@@ -151,6 +151,8 @@ pub struct Line {
     /// Romanization shipped with the lyrics, and its timing when it has some.
     pub romanization: Option<String>,
     pub timed_roman: Vec<Part>,
+    /// Starts a new verse (a TTML `<div>` after the first).
+    pub verse: bool,
 }
 
 impl Line {
@@ -1275,14 +1277,22 @@ pub fn parse_ttml(text: &str, song_ms: i32) -> Ttml {
             }
         }
     }
-    let ps: Vec<roxmltree::Node> = body.children().filter(|n| n.tag_name().name() == "div").flat_map(|d| d.children().filter(|n| n.tag_name().name() == "p")).collect();
+    // Each `<div>` is a verse; its first line is marked so plain text can break there.
+    let ps: Vec<(roxmltree::Node, bool)> = body
+        .children()
+        .filter(|n| n.tag_name().name() == "div")
+        .enumerate()
+        .flat_map(|(i, d)| d.children().filter(|n| n.tag_name().name() == "p").enumerate().map(move |(j, p)| (p, i > 0 && j == 0)))
+        .collect();
     if ps.is_empty() {
         return empty(language);
     }
     let mut lines: Vec<Line> = Vec::new();
     let mut keys: HashMap<String, Vec<usize>> = HashMap::new();
     let mut word_synced = false;
-    for p in ps {
+    let mut verse = false;
+    for (p, first) in ps {
+        verse |= first;
         let Some(begin) = attr(p, "begin") else { continue };
         let start = ttml_time(begin);
         let end = ttml_time(attr(p, "end").unwrap_or_default());
@@ -1292,7 +1302,8 @@ pub fn parse_ttml(text: &str, song_ms: i32) -> Ttml {
         if let Some(k) = attr(p, "key") {
             keys.entry(k.to_owned()).or_default().push(lines.len());
         }
-        lines.push(Line { start, dur: end - start, text, parts, agent, ..Default::default() });
+        lines.push(Line { start, dur: end - start, text, parts, agent, verse, ..Default::default() });
+        verse = false;
     }
     // Translations and transliterations, matched to lines by key.
     let meta_root = head_meta.and_then(|m| m.descendants().find(|n| n.tag_name().name() == "iTunesMetadata")).or(head_meta);
@@ -1416,6 +1427,14 @@ mod tests {
         assert_eq!(t.lines[2].agent.as_deref(), Some("v2"));
         assert!(t.lines[2].parts.is_empty());
         assert!(t.lines.last().unwrap().instrumental);
+    }
+
+    #[test]
+    fn ttml_divs_start_verses() {
+        let xml = r#"<tt xmlns="http://www.w3.org/ns/ttml"><body><div><p begin="1.0" end="2.0">a</p><p begin="2.0" end="3.0">b</p></div><div><p begin="4.0" end="5.0">c</p></div></body></tt>"#;
+        let t = parse_ttml(xml, 0);
+        let v: Vec<(&str, bool)> = t.lines.iter().filter(|l| !l.instrumental).map(|l| (l.text.as_str(), l.verse)).collect();
+        assert_eq!(v, [("a", false), ("b", false), ("c", true)]);
     }
 
     #[test]

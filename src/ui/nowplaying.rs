@@ -448,17 +448,14 @@ fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyric
             ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::TEXT_FAINT));
             ui.add_space(10.0);
         }
-        // A gap nobody sings over, or an empty line, breaks the verse; runs of them count once.
-        let mut gap = false;
+        let breaks = verse_breaks(lyrics);
         for (i, l) in lyrics.lines.iter().enumerate() {
             if l.instrumental || l.text.trim().is_empty() {
-                gap = true;
                 continue;
             }
-            if gap && i > 0 {
-                ui.add_space(14.0);
+            if breaks[i] {
+                ui.add_space(16.0);
             }
-            gap = false;
             ui.label(egui::RichText::new(l.text.trim()).font(theme::regular(16.0)).color(theme::with_alpha(Color32::WHITE, 0.9)));
             let roman = match roman.get(i) {
                 Some(Some(karaoke::Roman::Timed(_, r))) | Some(Some(karaoke::Roman::Text(r))) => Some(*r),
@@ -471,6 +468,33 @@ fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyric
         ui.add_space(80.0);
     });
 }
+
+/// Which sung lines start a verse after the first: after an empty line, a TTML `<div>`
+/// or an instrumental gap. Lyrics with no empty lines or `<div>`s also break at pauses,
+/// a line starting well after the one before it ends (line-synced LRC has no line ends,
+/// so only its instrumental gaps count).
+fn verse_breaks(lyrics: &Lyrics) -> Vec<bool> {
+    let sung = |l: &crate::lyrics::Line| !l.instrumental && !l.text.trim().is_empty();
+    let marked = lyrics.lines.iter().any(|l| l.verse) || lyrics.lines.windows(3).any(|w| sung(&w[0]) && !w[1].instrumental && w[1].text.trim().is_empty() && sung(&w[2]));
+    let mut out = vec![false; lyrics.lines.len()];
+    let mut prev: Option<&crate::lyrics::Line> = None;
+    let mut gap = false;
+    for (i, l) in lyrics.lines.iter().enumerate() {
+        if !sung(l) {
+            gap = true;
+            continue;
+        }
+        if let Some(p) = prev {
+            out[i] = gap || l.verse || (!marked && lyrics.sync != Sync::None && l.start - p.end() >= PAUSE_MS);
+        }
+        gap = false;
+        prev = Some(l);
+    }
+    out
+}
+
+/// A pause between sung lines this long reads as a verse break.
+const PAUSE_MS: i32 = 1500;
 
 /// The shown lyrics are synced, so the karaoke switch applies.
 fn lyrics_synced(app: &App) -> bool {
