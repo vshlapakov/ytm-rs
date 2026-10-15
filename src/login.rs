@@ -123,6 +123,19 @@ pub fn forget(profile_dir: &std::path::Path) {
     let _ = std::fs::remove_dir_all(profile_dir);
 }
 
+/// Puts the webview in `window`. On Linux wry only takes X11 window handles, so it goes
+/// into the window's GTK box instead, which works on Wayland (WSLg) too.
+pub(crate) fn attach<'a>(builder: WebViewBuilder<'a>, window: &'a tao::window::Window) -> wry::Result<wry::WebView> {
+    #[cfg(target_os = "linux")]
+    {
+        use tao::platform::unix::WindowExtUnix;
+        use wry::WebViewBuilderExtUnix;
+        builder.build_gtk(window.default_vbox().expect("tao windows have a GTK box"))
+    }
+    #[cfg(not(target_os = "linux"))]
+    builder.build(window)
+}
+
 fn run(site: Site, profile_dir: PathBuf) -> anyhow::Result<Outcome> {
     let mut event_loop = EventLoopBuilder::<()>::with_user_event().build();
 
@@ -139,8 +152,8 @@ fn run(site: Site, profile_dir: PathBuf) -> anyhow::Result<Outcome> {
             if matches!(ev, PageLoadEvent::Finished) && url.starts_with(site.home()) {
                 let _ = proxy.send_event(());
             }
-        })
-        .build(&window)?;
+        });
+    let webview = attach(webview, &window)?;
 
     let mut outcome = Outcome::Cancelled;
     event_loop.run_return(|event, _, flow| {
