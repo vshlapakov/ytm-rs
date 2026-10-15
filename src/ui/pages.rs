@@ -706,6 +706,10 @@ fn settings_body(app: &mut App, ui: &mut Ui) {
     // ---- lyrics (the better-lyrics extension's options)
     section_label(ui, "Lyrics", None);
     settings_card(ui, |ui| {
+        setting_row(ui, "Karaoke", Some("Synced lyrics follow the song line by line, word by word. Off shows them as plain text."), |ui| {
+            toggle(ui, &mut app.karaoke, "Karaoke");
+        });
+        divider(ui);
         setting_row(ui, "Romanization", Some("Japanese, Korean, Chinese, Cyrillic and other scripts in Latin letters. Timed with the lyrics when the source has it."), |ui| {
             toggle(ui, &mut app.show_roman, "Romanization");
         });
