@@ -222,6 +222,8 @@ pub struct App {
     extras_asked: Option<(String, String, String)>,
     show_roman: bool,
     show_trans: bool,
+    /// Synced lyrics as the animated karaoke view; off shows them as plain text.
+    karaoke: bool,
     lyric_prefs: lyric_prefs::Prefs,
     lyric_view: karaoke::View,
     lyric_clock: lyric_prefs::Clock,
@@ -405,6 +407,7 @@ impl App {
             extras_asked: None,
             show_roman: get("show_roman").is_none_or(|v| v == "1"),
             show_trans: get("show_trans").is_none_or(|v| v == "1"),
+            karaoke: get("lyrics_karaoke").is_some_and(|v| v == "1"),
             lyric_prefs: lyric_prefs::Prefs::load(&get),
             lyric_view: Default::default(),
             lyric_clock: Default::default(),
@@ -2014,6 +2017,7 @@ impl eframe::App for App {
         storage.set_string("reactive_bg", b(self.reactive_bg));
         storage.set_string("show_roman", b(self.show_roman));
         storage.set_string("show_trans", b(self.show_trans));
+        storage.set_string("lyrics_karaoke", b(self.karaoke));
         // Background test runs mustn't change the listener's sources or per-song picks.
         if std::env::var_os("YTM_BACKGROUND").is_none() || std::env::var_os("YTM_SAVE_SESSION").is_some() {
             self.lyric_prefs.save(storage);

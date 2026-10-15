@@ -307,8 +307,8 @@ fn lyrics_panel(app: &mut App, ui: &mut Ui, rect: Rect, now: f64, centered: bool
     };
     if let Some(lyrics) = app.lyric_prefs.choose(&id, &set).and_then(|p| set.get(p)) {
         let panel = Rect::from_min_max(rect.min, pos2(rect.right(), rect.bottom() - 4.0));
-        if lyrics.sync == Sync::None {
-            plain_lyrics(app, ui, panel, lyrics);
+        if lyrics.sync == Sync::None || !app.karaoke {
+            plain_lyrics(app, ui, panel, &id, lyrics);
         } else {
             synced(app, ui, panel, &id, lyrics, now, centered);
         }
@@ -437,19 +437,44 @@ fn synced(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics, now
     }
 }
 
-fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, lyrics: &Lyrics) {
+/// Lyrics as plain text, the way YouTube Music shows them: unsynced lyrics, and synced
+/// ones with karaoke off. Romanization and translation sit dimmer under their line.
+fn plain_lyrics(app: &mut App, ui: &mut Ui, rect: Rect, id: &str, lyrics: &Lyrics) {
+    let (roman, trans) = decorations(app.show_roman, app.show_trans, &app.lyric_prefs.target, app.lyrics_extras.as_ref(), id, lyrics);
     let mut child = ui.new_child(egui::UiBuilder::new().max_rect(rect));
-    egui::ScrollArea::vertical().id_salt("plain-lyrics").auto_shrink(false).show(&mut child, |ui| {
-        ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::TEXT_FAINT));
-        ui.add_space(14.0);
-        let style = &app.look().lyrics;
-        let size = (32.0 * style.size.clamp(0.6, 1.6)).min(rect.width() / 14.0).max(18.0);
-        for l in &lyrics.lines {
-            ui.label(egui::RichText::new(&l.text).font(theme::lyric_font(&style.font, style.weight, size)).color(theme::with_alpha(Color32::WHITE, 0.85)));
-            ui.add_space(size * 0.25);
+    egui::ScrollArea::vertical().id_salt(("plain-lyrics", id)).auto_shrink(false).show(&mut child, |ui| {
+        ui.spacing_mut().item_spacing.y = 4.0;
+        if lyrics.sync == Sync::None {
+            ui.label(egui::RichText::new("These lyrics aren't synced").font(theme::regular(13.0)).color(theme::TEXT_FAINT));
+            ui.add_space(10.0);
+        }
+        // A gap nobody sings over, or an empty line, breaks the verse; runs of them count once.
+        let mut gap = false;
+        for (i, l) in lyrics.lines.iter().enumerate() {
+            if l.instrumental || l.text.trim().is_empty() {
+                gap = true;
+                continue;
+            }
+            if gap && i > 0 {
+                ui.add_space(14.0);
+            }
+            gap = false;
+            ui.label(egui::RichText::new(l.text.trim()).font(theme::regular(16.0)).color(theme::with_alpha(Color32::WHITE, 0.9)));
+            let roman = match roman.get(i) {
+                Some(Some(karaoke::Roman::Timed(_, r))) | Some(Some(karaoke::Roman::Text(r))) => Some(*r),
+                _ => None,
+            };
+            for extra in [roman, trans.get(i).copied().flatten()].into_iter().flatten() {
+                ui.label(egui::RichText::new(extra.trim()).font(theme::regular(14.0)).color(theme::text_dim()));
+            }
         }
         ui.add_space(80.0);
     });
+}
+
+/// The shown lyrics are synced, so the karaoke switch applies.
+fn lyrics_synced(app: &App) -> bool {
+    app.lyrics.as_ref().and_then(|(id, set)| app.lyric_prefs.choose(id, set).and_then(|p| set.get(p))).is_some_and(|l| l.sync != Sync::None)
 }
 
 /// Sync-type colours from the extension's dock (syllable, word, line, unsynced).
@@ -514,6 +539,9 @@ fn lyric_options(app: &mut App, ui: &mut Ui) {
     let tip = format!("Translation · {}", lang_name(&app.lyric_prefs.target));
     switch_row(ui, &tip, &mut app.show_trans);
     switch_row(ui, "Romanization", &mut app.show_roman);
+    if lyrics_synced(app) && switch_row(ui, "Karaoke", &mut app.karaoke) {
+        app.lyric_view.reset();
+    }
     // This song's timing for the shown source: ‹ +0.0s ›
     let off = app.lyric_prefs.song_offset(&id, shown);
     let (row, _) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::hover());
@@ -568,7 +596,7 @@ fn source_row(ui: &mut Ui, name: &str, sync: SyncKind, current: bool) -> bool {
 }
 
 /// A label with an on/off switch; the whole row toggles.
-fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) {
+fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) -> bool {
     let (rect, resp) = ui.allocate_exact_size(vec2(ui.available_width(), 40.0), Sense::click());
     let resp = named(resp, label).on_hover_cursor(egui::CursorIcon::PointingHand);
     if resp.clicked() {
@@ -585,6 +613,7 @@ fn switch_row(ui: &mut Ui, label: &str, on: &mut bool) {
     ui.painter().rect_filled(track, 10.0, theme::lerp_color(theme::glass(0.16 + 0.06 * h), accent, t));
     let knob = pos2(egui::lerp(track.left() + 10.0..=track.right() - 10.0, t), track.center().y);
     ui.painter().circle_filled(knob, 8.0, Color32::WHITE);
+    resp.clicked()
 }
 
 /// A small icon button (24 × 24).
