@@ -77,8 +77,8 @@ fn run(profile_dir: PathBuf) -> anyhow::Result<String> {
         .with_ipc_handler(move |req| {
             let _ = proxy.send_event(req.body().clone());
         })
-        .with_url(CHALLENGE)
-        .build(&window)?;
+        .with_url(CHALLENGE);
+    let webview = crate::login::attach(webview, &window)?;
 
     let started = Instant::now();
     let mut result: anyhow::Result<String> = Err(anyhow::anyhow!("closed before verification finished"));
